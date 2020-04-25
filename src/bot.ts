@@ -1,10 +1,11 @@
 const Discord = require('discord.js');
 const { prefix } = require('./config.json');
-const api = require('./api.js');
+const api = require('../api.js');
 const ytdl = require('ytdl-core');
 require('dotenv').config();
 const client = new Discord.Client();
 const queue = new Map();
+import axios from 'axios';
 
 client.once('ready', () => {
     console.log('Bot Connected');
@@ -107,16 +108,24 @@ async function execute(message, serverQueue) {
 
 }
 
-async function search(message) {
+async function search(message: string) {
     let videosList;
-    const idResponse = await getIds(message);
+    const idResponse = await axios.get(`${googleBaseURL}/search`, {
+        params: {
+            part: "snippet",
+            q: message,
+            key: process.env.APIKEY,
+            access_token: process.env.OAUTHTOKEN,
+        },
+        responseType: 'json'
+    });
     const idList = idResponse.data.items.map(video => {
         return video.id.videoId;
     });
-
     idList.forEach(async id => {
         const videoResponse = await getDetailsById(id);
-        videosList.push(videoResponse.data.items);
+        console.log(videoResponse.data);
+        // videosList.push(videoResponse.data.items);
     });
 }
 
