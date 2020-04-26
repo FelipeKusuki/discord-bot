@@ -32,6 +32,9 @@ client.on('message', async message => {
             search(message);
         }
         return;
+    } else if (command(message, 'list')) {
+        addPlaylist(message);
+        return;
     } else if (command(message, 'skip')) {
         skip(message, serverQueue);
         return;
@@ -77,7 +80,6 @@ async function execute(message, serverQueue) {
     if (!permissions.has('CONNECT') || !permissions.has('SPEAK')) {
         return message.channel.send('O Jovem! Eu preciso de permissões de falar e conectar!');
     }
-
     const songInfo = await ytdl.getInfo(args[1]);
     const song = {
         title: songInfo.title,
@@ -95,7 +97,6 @@ async function execute(message, serverQueue) {
         };
 
         queue.set(message.guild.id, queueContruct);
-
         queueContruct.songs.push(song);
         try {
             var connection = await voiceChannel.join();
@@ -108,10 +109,54 @@ async function execute(message, serverQueue) {
         }
     } else {
         serverQueue.songs.push(song);
-        console.log(serverQueue.songs);
         return message.channel.send(`${song.title} foi adicionado a fila!`);
     }
 
+}
+
+async function addPlaylist(message){
+    const args = message.content.split(' ');
+    const voiceChannel = message.member.voiceChannel;
+    //pega a penas a url do youtube e manda para o metodo getPlaylistData para pegar a lista de musicas
+    const playlistData = await getPlaylistData(args[1], "");
+    const numberPages = (playlistData.pageInfo.totalResults/playlistData.pageInfo.resultsPerPage);
+    for (let page=1; page<=numberPages; page++) {
+        const newPage = await getPlaylistData(args[1], playlistData.nextPageToken)
+        playlistData.items.push(...newPage.items);
+    }
+    songsList = []
+    // Faz um for na lista de musicas para pegar o nome e url do video
+    for(let item of playlistData.items){
+        serverQueue = queue.get(message.guild.id);
+        const linkYoutube = 'https://www.youtube.com/watch?v=' + item.snippet.resourceId.videoId + '&list=' + item.snippet.playlistId;
+        const song = {
+            title: item.snippet.title,
+            url: linkYoutube,
+        };
+        songsList.push(song);
+    }
+    // Constroi o obj para adicionar na fila do markin
+    // Todo o processo daqui para baixo pode ser separado em outros metodos,
+    // pois esse codigo esta sendo repetido no metodo 'execute', mas foi colocado aqui direto para testar playlist
+    const queueContruct = {
+        textChannel: message.channel,
+        voiceChannel: voiceChannel,
+        connection: null,
+        songs: songsList,
+        volume: 5,
+        playing: true,
+    };
+
+    queue.set(message.guild.id, queueContruct);
+    try {
+        var connection = await voiceChannel.join();
+        queueContruct.connection = connection;
+        play(message.guild, queueContruct.songs[0]);
+    } catch (err) {
+        message.channel.send('I encountered a problem connecting to the voice channel ', JSON.stringify(err));
+        queue.delete(message.guild.id);
+        return message.channel.send(err);
+    }
 }
 
 async function search(message) {
@@ -144,7 +189,16 @@ async function getDetailsByIdList(idList) {
     return await api.searchById(idList.join(","));
 }
 
-function showOptions(message, videosList) {
+async function getPlaylistData(url, nextPageToken="") {
+    const result = await api.getPlaylist(url, nextPageToken);
+    if (result) {
+        return result.data
+    } else {
+        serverQueue.textChannel.send('Erro ao baixar playlist do Youtube');
+    }
+}
+
+function showOptions(message, videosList){
     let msg = '';
     new Promise(resolve => {
         let userId = message.author.id;
@@ -191,7 +245,7 @@ function play(guild, song) {
         queue.delete(guild.id);
         return;
     }
-    const stream = ytdl(song.url, { filter: 'audioonly' });
+    const stream = ytdl(song.url, {'highWaterMark ': 64000 });
     const dispatcher = serverQueue.connection.playStream(stream);
     dispatcher.on('end', () => {
         serverQueue.songs.shift();
